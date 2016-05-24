@@ -1,6 +1,9 @@
 /********************************************************************\
 Sockit-100 readout 
 May 24, 2016
+
+Uses UDP connection to sockit to get data.
+
  Thomas Lindner (TRIUMF)
 \********************************************************************/
 
@@ -115,15 +118,64 @@ EQUIPMENT equipment[] = {
   resume_run:     When a run is resumed. Should enable trigger events.
 \********************************************************************/
 
+#include <sys/socket.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <errno.h>
+#include <netdb.h>
+#include <byteswap.h>
 
+#define BUFSIZE 16384
 /*-- Frontend Init -------------------------------------------------*/
 INT frontend_init()
 {
-
-
   
-   return SUCCESS;
+  // Setup UDP connection
+  int fd;
+  if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { perror("cannot create socket"); return FE_ERR_HW; } 
+  
+  struct sockaddr_in myaddr; 
+  memset((char *)&myaddr, 0, sizeof(myaddr)); 
+  myaddr.sin_family = AF_INET; 
+  myaddr.sin_addr.s_addr = htonl(INADDR_ANY); // Accept connection from anywhere...  
+  myaddr.sin_port = htons(43523); 
+  if (bind(fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) < 0) { perror("bind failed"); return FE_ERR_HW; }
+
+
+  // receive data...
+  struct sockaddr_in remaddr; 
+  socklen_t addrlen = sizeof(remaddr); 
+  /* length of addresses */ 
+  int recvlen;
+  unsigned char buf[BUFSIZE];
+  
+
+  for(int i = 0; i < 10; i++){
+    printf("waiting on port %d\n", 43523); 
+    //  recvlen = recvfrom(fd, buf, BUFSIZE, 0, (struct sockaddr *)&remaddr, &addrlen); 
+    recvlen = recvfrom(fd, buf, BUFSIZE, 0, 0, 0);
+    printf("received %d bytes\n", recvlen);
+
+    unsigned int *data = (unsigned int*)buf;
+    
+    for(int j = 0; j < 5; j++){
+      std::cout <<  std::hex << "0x" << data[j] << " 0x" << __bswap_32 (data[j]) <<  std::dec << std::endl;
+    }
+    for(int j = recvlen/4-5; j < recvlen/4 + 1; j++){
+      std::cout <<  std::hex << "0x" << data[j]  << " 0x" << __bswap_32 (data[j]) << std::dec << std::endl;
+    }
+
+    if (recvlen > 0) { 
+      buf[recvlen] = 0; 
+      printf("received message: \"%s\"\n", buf); 
+    }
+  }
+   
+  exit(0);
+
+  return SUCCESS;
+
 }
 
 

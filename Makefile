@@ -23,7 +23,7 @@ endif
 # ROOT library
 ifdef ROOTSYS
 CXXFLAGS += -DHAVE_ROOT -I$(ROOTSYS)/include -I$(ROOTSYS)/include/root
-ROOTGLIBS = $(shell $(ROOTSYS)/bin/root-config --glibs) -lThread -Wl,-rpath,$(ROOTSYS)/lib
+ROOTGLIBS = $(shell $(ROOTSYS)/bin/root-config --glibs)  -Wl,-rpath,$(ROOTSYS)/lib
 LIBS += $(ROOTGLIBS)
 endif
 
