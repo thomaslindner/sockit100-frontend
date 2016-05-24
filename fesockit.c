@@ -127,52 +127,31 @@ EQUIPMENT equipment[] = {
 #include <byteswap.h>
 
 #define BUFSIZE 16384
+
+int fFileDescriptor[2];
+
+
 /*-- Frontend Init -------------------------------------------------*/
 INT frontend_init()
 {
   
-  // Setup UDP connection
-  int fd;
-  if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { perror("cannot create socket"); return FE_ERR_HW; } 
+  // Setup UDP connection for data 1
+  if ((fFileDescriptor[0] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { perror("cannot create socket"); return FE_ERR_HW; } 
   
   struct sockaddr_in myaddr; 
   memset((char *)&myaddr, 0, sizeof(myaddr)); 
   myaddr.sin_family = AF_INET; 
   myaddr.sin_addr.s_addr = htonl(INADDR_ANY); // Accept connection from anywhere...  
   myaddr.sin_port = htons(43523); 
-  if (bind(fd, (struct sockaddr *)&myaddr, sizeof(myaddr)) < 0) { perror("bind failed"); return FE_ERR_HW; }
+  if (bind(fFileDescriptor[0], (struct sockaddr *)&myaddr, sizeof(myaddr)) < 0) { perror("bind failed"); return FE_ERR_HW; }
 
-
-  // receive data...
-  struct sockaddr_in remaddr; 
-  socklen_t addrlen = sizeof(remaddr); 
-  /* length of addresses */ 
-  int recvlen;
-  unsigned char buf[BUFSIZE];
-  
-
-  for(int i = 0; i < 10; i++){
-    printf("waiting on port %d\n", 43523); 
-    //  recvlen = recvfrom(fd, buf, BUFSIZE, 0, (struct sockaddr *)&remaddr, &addrlen); 
-    recvlen = recvfrom(fd, buf, BUFSIZE, 0, 0, 0);
-    printf("received %d bytes\n", recvlen);
-
-    unsigned int *data = (unsigned int*)buf;
-    
-    for(int j = 0; j < 5; j++){
-      std::cout <<  std::hex << "0x" << data[j] << " 0x" << __bswap_32 (data[j]) <<  std::dec << std::endl;
-    }
-    for(int j = recvlen/4-5; j < recvlen/4 + 1; j++){
-      std::cout <<  std::hex << "0x" << data[j]  << " 0x" << __bswap_32 (data[j]) << std::dec << std::endl;
-    }
-
-    if (recvlen > 0) { 
-      buf[recvlen] = 0; 
-      printf("received message: \"%s\"\n", buf); 
-    }
-  }
-   
-  exit(0);
+  // Setup UDP connection for data 2
+  if ((fFileDescriptor[1] = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { perror("cannot create socket"); return FE_ERR_HW; }   
+  memset((char *)&myaddr, 0, sizeof(myaddr)); 
+  myaddr.sin_family = AF_INET; 
+  myaddr.sin_addr.s_addr = htonl(INADDR_ANY); // Accept connection from anywhere...  
+  myaddr.sin_port = htons(43524); 
+  if (bind(fFileDescriptor[1], (struct sockaddr *)&myaddr, sizeof(myaddr)) < 0) { perror("bind failed"); return FE_ERR_HW; }
 
   return SUCCESS;
 
@@ -185,7 +164,7 @@ INT frontend_init()
 
 INT frontend_exit()
 {
-  printf("Exiting fedcrc!\n");
+  printf("Exiting fesockit!\n");
    return SUCCESS;
 }
 
@@ -282,13 +261,66 @@ INT read_trigger_event(char *pevent, INT off)
   /* init bank structure */
   bk_init32(pevent);
   
-  uint32_t *pdata32;
-  /* create structured ADC0 bank of double words (i.e. 4-byte words)  */
-  bk_create(pevent, "ADC0", TID_DWORD, (void **)&pdata32);
+  uint32_t *pdata;
+  
+  bk_create(pevent, "D724", TID_DWORD, (void **)&pdata);
+
+  // receive data...
+  //struct sockaddr_in remaddr; 
+  //socklen_t addrlen = sizeof(remaddr); 
+  /* length of addresses */ 
+  int recvlen;
+  unsigned char buf[BUFSIZE];
 
 
-  bk_close(pevent, pdata32);    
+  // OK, we are going to beat the data packet up till they look like data from CAEN DT5724, 
+  // just so my offline analysis is easier...
 
-  usleep(10000);
+  // Here's the header bitswords; mostly fill with nonsense/
+  *pdata++ = 0xa0000202;
+  *pdata++ = 0x00000003;
+  *pdata++ = 0x00000000;
+  *pdata++ = 0x00000000;
+
+  
+  // data 1
+  for(int i = 0; i < 2; i++){
+    
+    recvlen = recvfrom(fFileDescriptor[i], buf, BUFSIZE, 0, 0, 0);
+    printf("received %d bytes\n", recvlen);
+    
+    unsigned int *data = (unsigned int*)buf;
+    // Number of 32-bit words to create.
+    int length = recvlen/4;
+
+    
+
+    for(int j = 0; j < length; j++){
+
+      unsigned int word = 0;
+      // Need to byte swap and mask upper bits,
+      // then combine two samples into each 32-bit word
+      word +=  (__bswap_32 (data[j*2])) & 0xffff;
+      word +=  ((__bswap_32 (data[j*2+1])) & 0xffff) << 16;
+       
+      *pdata++ = word;
+      if(j < 5)
+	std::cout << std::hex << length << " 0x" <<  word <<  std::dec << std::endl;
+    }
+
+    for(int j = 0; j < 5; j++){
+      std::cout <<  std::hex << "0x" << data[j] << " 0x" << __bswap_32 (data[j]) <<  std::dec << std::endl;
+    }
+    for(int j = recvlen/4-5; j < recvlen/4 + 1; j++){
+      std::cout <<  std::hex << "0x" << data[j]  << " 0x" << __bswap_32 (data[j]) << std::dec << std::endl;
+    }
+    std::cout << "Nwords " <<  length  << std::endl;
+   
+  }
+
+  bk_close(pevent, pdata);    
+
+
+  usleep(100);
   return bk_size(pevent);
 }
